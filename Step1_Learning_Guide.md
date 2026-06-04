@@ -82,6 +82,92 @@ width = 100px, BGRA (4 bytes/px)
 
 ---
 
+## CGContext 初期化パラメータ詳解
+
+`CGContext` の初期化は BGRA フォーマットとの対応を正確に伝える必要がある。
+
+```swift
+CGContext(
+    data: base,
+    width: width, height: height,
+    bitsPerComponent: 8,
+    bytesPerRow: bytesPerRow,
+    space: CGColorSpaceCreateDeviceRGB(),
+    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+             | CGBitmapInfo.byteOrder32Little.rawValue
+)
+```
+
+### `data: base`
+
+`CVPixelBuffer` の生メモリポインタをそのまま渡す。CGContext は新しいメモリを確保しない。
+`data: nil` にすると CGContext が自前でメモリを確保するが、その場合 CVPixelBuffer に書き戻せない。
+
+### `bitsPerComponent: 8`
+
+1チャンネル（B・G・R・A それぞれ）あたりのビット数。`UInt8`（0〜255）に対応する。
+
+```
+8 bits/component × 4 components (B,G,R,A) = 32 bits = 4 bytes/pixel
+```
+
+`kCVPixelFormatType_32BGRA` の `32` がこれに対応している。ピクセル書き込みコードの `UInt8` 型がそのまま 1チャンネル分。
+
+### `bytesPerRow`
+
+`width * 4` ではなく `CVPixelBufferGetBytesPerRow()` の値を使う。
+
+```
+bytesPerRow = width * 4 + padding
+
+// 例: width = 100px
+width * 4   = 400 bytes（最低限）
+bytesPerRow = 448 bytes（次の 64byte 境界 = 7 × 64）
+padding     = 48 bytes
+
+// 例: width = 256px
+width * 4   = 1024 bytes
+bytesPerRow = 1024 bytes（アライメントと一致）
+padding     = 0 bytes
+```
+
+`width * 4` を渡すと CGContext と CVPixelBuffer のメモリ解釈がズレ、描画が斜めにズレる。
+
+### `bitmapInfo` — BGRA になる組み合わせ
+
+2つのフラグの OR。
+
+**`CGImageAlphaInfo.premultipliedFirst`**
+
+- `First` = アルファはメモリ先頭（index 0）
+- `premultiplied` = RGB 値がアルファ乗算済み（CGContext の内部形式）
+
+論理的なチャンネル順: `[A][R][G][B]`
+
+**`CGBitmapInfo.byteOrder32Little`**
+
+CPU のリトルエンディアンで 32bit を読む指定。
+
+```
+物理メモリ: [0xBB][0xGG][0xRR][0xAA]  ← BGRA の並び
+32bit リトルエンディアンで読む → 0xAARRGGBB（論理的に ARGB）
+```
+
+**2つを組み合わせると**
+
+`premultipliedFirst`（論理 ARGB）+ `byteOrder32Little`（バイト逆順）= 物理メモリが BGRA になる。
+
+| パラメータ | 値 | 意味 |
+|---|---|---|
+| `bitsPerComponent` | `8` | 各チャンネル UInt8（0〜255）|
+| `bytesPerRow` | `CVPixelBufferGetBytesPerRow()` | パディング込みの行幅 |
+| `space` | `DeviceRGB` | デバイス依存 RGB（変換コストなし）|
+| `bitmapInfo` | `premultipliedFirst \| byteOrder32Little` | 物理メモリが BGRA になる組み合わせ |
+
+1つでもズレると色チャンネルが入れ替わるか画像が壊れる。
+
+---
+
 ## CGImage との変換
 
 ```

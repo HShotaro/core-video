@@ -73,12 +73,10 @@ final class VideoEncoder {
         let encoder = Unmanaged<VideoEncoder>.fromOpaque(refcon).takeUnretainedValue()
         encoder.encodedCount += 1
 
-        let isKey = !flags.contains(.frameDropped) &&
-            CMSampleBufferGetAttachments(sampleBuffer, createIfNecessary: false)
-                .map { dict -> Bool in
-                    let key = kCMSampleAttachmentKey_NotSync as String
-                    return (dict as? [String: Any])?[key] == nil
-                } ?? true
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+            as? [[CFString: Any]]
+        let isNotSync = attachments?.first?[kCMSampleAttachmentKey_NotSync] as? Bool ?? false
+        let isKey = !flags.contains(.frameDropped) && !isNotSync
 
         if isKey { encoder.keyFrameCount += 1 }
 
